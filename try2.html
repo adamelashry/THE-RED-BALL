@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mouse Dodger</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #222;
+        }
+        .player {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: red;
+            border-radius: 50%;
+        }
+        .obstacle {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            background-color: green;
+            border-radius: 50%;
+        }
+        .invincibility-ball {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: blue;
+            border-radius: 50%;
+        }
+        .score-board, .best-score-board, .timer-board {
+            position: absolute;
+            top: 20px;
+            font-size: 30px;
+            color: white;
+        }
+        .score-board {
+            left: 20px;
+        }
+        .best-score-board {
+            right: 20px;
+        }
+        .timer-board {
+            top: 60px;
+            right: 20px;
+        }
+        .game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            color: white;
+            display: none;
+        }
+        .credits {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 20px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container" id="gameContainer">
+        <div class="score-board" id="score">Score: 0</div>
+        <div class="best-score-board" id="bestScore">Best Score: 0</div>
+        <div class="timer-board" id="timer">Invincibility: 0</div>
+        <div class="game-over" id="gameOver">Game Over! Click to Restart</div>
+        <div id="player" class="player"></div>
+        <div class="credits" id="credits">Developed by Adam</div>
+    </div>
+
+    <script>
+        const gameContainer = document.getElementById('gameContainer');
+        const player = document.getElementById('player');
+        const scoreDisplay = document.getElementById('score');
+        const bestScoreDisplay = document.getElementById('bestScore');
+        const timerDisplay = document.getElementById('timer');
+        const gameOverMessage = document.getElementById('gameOver');
+        const credits = document.getElementById('credits');
+
+        let score = 0;
+        let playerPosition = { x: 0, y: 0 };
+        let gameOver = false;
+        let obstacles = [];
+        let invincible = false;
+        let invincibilityTime = 0;
+        let invincibilityBalls = [];
+        let invincibilityInterval;
+        let fallSpeed = 5; // Starting fall speed for obstacles and invincibility balls
+        let obstacleSpawnRate = 0.05; // Starting spawn rate for obstacles
+        let invincibilityBallSpawnRate = 0.005; // Starting spawn rate for invincibility balls
+        let bestScore = localStorage.getItem('bestScore') ? parseInt(localStorage.getItem('bestScore')) : 0; // Load best score from localStorage
+
+        const randomPosition = () => {
+            const x = Math.floor(Math.random() * (gameContainer.clientWidth - 30));
+            return x;
+        };
+
+        const createObstacle = () => {
+            const obstacle = document.createElement('div');
+            obstacle.classList.add('obstacle');
+            obstacle.style.left = `${randomPosition()}px`;
+            obstacle.style.top = '-30px';
+            gameContainer.appendChild(obstacle);
+            obstacles.push(obstacle);
+        };
+
+        const createInvincibilityBall = () => {
+            const ball = document.createElement('div');
+            ball.classList.add('invincibility-ball');
+            ball.style.left = `${randomPosition()}px`;
+            ball.style.top = '-20px';
+            gameContainer.appendChild(ball);
+            invincibilityBalls.push(ball);
+        };
+
+        const movePlayer = (e) => {
+            if (!gameOver) {
+                playerPosition.x = e.clientX - 15; // Center the player on the mouse
+                playerPosition.y = e.clientY - 15;
+                player.style.left = `${playerPosition.x}px`;
+                player.style.top = `${playerPosition.y}px`;
+            }
+        };
+
+        const updateObstacles = () => {
+            obstacles.forEach((obstacle, index) => {
+                const currentTop = parseInt(obstacle.style.top);
+                if (currentTop > gameContainer.clientHeight) {
+                    gameContainer.removeChild(obstacle);
+                    obstacles.splice(index, 1);
+                    score += 10; // Increase score for surviving obstacles
+                    scoreDisplay.textContent = `Score: ${score}`;
+
+                    // Every 500 points, increase the fall speed by 20%
+                    if (score % 500 === 0) {
+                        fallSpeed *= 1.2;
+                    }
+
+                    // Every 1000 points, increase the spawn rate and fall speed
+                    if (score % 1000 === 0) {
+                        obstacleSpawnRate *= 1.2; // Increase spawn rate for obstacles
+                        invincibilityBallSpawnRate *= 1.2; // Increase spawn rate for invincibility balls
+                    }
+
+                    // Update best score if necessary
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestScoreDisplay.textContent = `Best Score: ${bestScore}`;
+                        localStorage.setItem('bestScore', bestScore); // Save best score to localStorage
+                    }
+                } else {
+                    obstacle.style.top = `${currentTop + fallSpeed}px`;
+                    checkCollision(obstacle, index);
+                }
+            });
+        };
+
+        const updateInvincibilityBalls = () => {
+            invincibilityBalls.forEach((ball, index) => {
+                const currentTop = parseInt(ball.style.top);
+                if (currentTop > gameContainer.clientHeight) {
+                    gameContainer.removeChild(ball);
+                    invincibilityBalls.splice(index, 1);
+                } else {
+                    ball.style.top = `${currentTop + fallSpeed}px`;
+                    checkBallCollision(ball, index);
+                }
+            });
+        };
+
+        const checkCollision = (obstacle, index) => {
+            if (invincible) return; // If invincible, no collision happens
+            const playerRect = player.getBoundingClientRect();
+            const obstacleRect = obstacle.getBoundingClientRect();
+
+            if (playerRect.left < obstacleRect.right && playerRect.right > obstacleRect.left &&
+                playerRect.top < obstacleRect.bottom && playerRect.bottom > obstacleRect.top) {
+                endGame();
+            }
+        };
+
+        const checkBallCollision = (ball, index) => {
+            const playerRect = player.getBoundingClientRect();
+            const ballRect = ball.getBoundingClientRect();
+
+            if (playerRect.left < ballRect.right && playerRect.right > ballRect.left &&
+                playerRect.top < ballRect.bottom && playerRect.bottom > ballRect.top) {
+                activateInvincibility();
+                gameContainer.removeChild(ball);
+                invincibilityBalls.splice(index, 1);
+            }
+        };
+
+        const activateInvincibility = () => {
+            invincible = true;
+            invincibilityTime = 5; // Set invincibility time to 5 seconds
+            timerDisplay.textContent = `Invincibility: ${invincibilityTime}`;
+            clearInterval(invincibilityInterval); // Clear any existing interval
+            invincibilityInterval = setInterval(() => {
+                if (invincibilityTime > 0) {
+                    invincibilityTime--;
+                    timerDisplay.textContent = `Invincibility: ${invincibilityTime}`;
+                } else {
+                    invincible = false;
+                    clearInterval(invincibilityInterval); // Stop the countdown
+                    timerDisplay.textContent = 'Invincibility: 0';
+                }
+            }, 1000); // Real second intervals
+        };
+
+        const endGame = () => {
+            gameOver = true;
+            gameOverMessage.style.display = 'block';
+        };
+
+        const restartGame = () => {
+            gameOver = false;
+            score = 0;
+            fallSpeed = 5; // Reset fall speed
+            obstacleSpawnRate = 0.05; // Reset spawn rate for obstacles
+            invincibilityBallSpawnRate = 0.005; // Reset spawn rate for invincibility balls
+            invincible = false;
+            invincibilityTime = 0;
+            scoreDisplay.textContent = `Score: 0`;
+            timerDisplay.textContent = `Invincibility: 0`;
+            gameOverMessage.style.display = 'none';
+            obstacles.forEach(obstacle => gameContainer.removeChild(obstacle));
+            invincibilityBalls.forEach(ball => gameContainer.removeChild(ball));
+            obstacles = [];
+            invincibilityBalls = [];
+            player.style.left = '0px';
+            player.style.top = '0px';
+            gameLoop(); // Restart the game loop
+        };
+
+        const gameLoop = () => {
+            if (!gameOver) {
+                updateObstacles();
+                updateInvincibilityBalls();
+                if (Math.random() < obstacleSpawnRate) { // Adjust the spawn rate of obstacles
+                    createObstacle();
+                }
+                if (Math.random() < invincibilityBallSpawnRate) { // Even lower spawn rate for invincibility balls
+                    createInvincibilityBall();
+                }
+                requestAnimationFrame(gameLoop);
+            }
+        };
+
+        gameContainer.addEventListener('mousemove', movePlayer);
+        gameOverMessage.addEventListener('click', restartGame);
+
+        bestScoreDisplay.textContent = `Best Score: ${bestScore}`; // Display best score on load
+        gameLoop(); // Start the game loop
+    </script>
+</body>
+</html>
